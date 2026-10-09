@@ -1,0 +1,151 @@
+%% Liu et al. 2025
+% Efficient photocatalytic decomposition of PFOA over BiOI1-x with 
+% low power LED light
+
+clc; clear;
+
+%% Reading in the data
+% Figure 6 c) (light)
+
+csvPath = fullfile(pwd, 'Liu_2025\exp_fig_S15_1.4V_Liu_2025.csv');
+
+% Read the raw data
+[BRaw, spcRaw] = SpinTrapUtils.read_csv(csvPath);
+
+%% Data preparation
+
+% Correct the baseline 
+% (use the average values in these ranges for linear baseline)
+Bvals = [340 345; 356 360];
+
+% Plot the diagnostic plots
+SpinTrapUtils.plot_full_baseline_diagnostics(BRaw, spcRaw, Bvals)
+[spcCorr, baseline] = SpinTrapUtils.baseline_correct(BRaw, spcRaw, Bvals);
+% Scale the baseline corrected spectra to (-1,1)
+spcCorr = spcCorr ./ max(abs(spcCorr));
+
+% Uniformly interpolate the data for fitting
+nPoints = 10e3;
+SpinTrapUtils.plot_uniform(BRaw, spcCorr, nPoints);
+[BExp, spcExp] = SpinTrapUtils.cast_to_uniform(BRaw, spcCorr, nPoints);
+
+% Subtract a mild cubic background fit too
+p = [2.565332208723487e-04	-0.269768895019644	...
+    94.546630628056874	-1.104347872017033e+04];
+spcExp = spcExp - polyval(p, BExp);
+SpinTrapUtils.plot_uniform(BExp, spcExp, nPoints);
+
+
+%% Plot with original fit
+
+% the MW frequency is not given in the original text
+% an appropriate frequency was guessed to center the spectra
+Exp.mwFreq = 9.835; % GHz
+Exp.Range = [min(BExp(:)) max(BExp(:))]; % mT 
+Exp.nPoints = nPoints;
+
+% the original claim is that the spectra is unusual but characteristic
+% of the DMPO-OH adduct
+Sys1 = SpinTrapUtils.DMPO_H(); % use the default DMPO data
+Sys2 = SpinTrapUtils.DMPO_OH(); % use the default DMPO data
+
+
+[~, spc1] = garlic(Sys1, Exp);
+[~, spc2] = garlic(Sys2, Exp);
+
+
+golaySmooth = 51; scaleToUnit = true;
+SpinTrapUtils.plot_residuals(BExp, spcExp, spc2, golaySmooth, scaleToUnit);
+
+%% Plot with updated fit
+
+Exp.mwFreq = 9.833; % GHz
+Exp.Range = [min(BExp(:)) max(BExp(:))]; % mT 
+Exp.nPoints = nPoints;
+
+Sys1 = SpinTrapUtils.DMPO_H(); % use the default DMPO data
+Sys2 = SpinTrapUtils.DMPO_OH(); % use the default DMPO data
+
+Sys1.weight = 0.5; Sys2.weight = 0.5;
+
+% Parameters to vary
+Sys1Vary.g = 0.01; Sys2Vary.g = 0.01;
+Sys1Vary.A = [2 2] * SpinTrapUtils.gauss_to_MHz(Sys1.g);
+Sys2Vary.A = [2 2] * SpinTrapUtils.gauss_to_MHz(Sys2.g);
+Sys1Vary.lwpp = 0.5; Sys2Vary.lwpp = 0.5;
+Sys1Vary.weight = 0.2; Sys2Vary.weight = 0.2; 
+
+% Call esfit - fitted system defined below
+%esfit(spcExp, @garlic, {{Sys1, Sys2}, Exp}, {{Sys1Vary, Sys2Vary}});
+
+% Fitted parameters
+Sys1.g = 2.0056;
+Sys1.A = [46.3317 63.2237]; % MHz
+Sys1.lwpp = 0.14087;
+Sys1.weight = 0.4715;
+
+Sys2.g = 2.00578;
+Sys2.A = [41.831 41.5879]; % MHz
+Sys2.lwpp = 0.13068;
+Sys2.weight = 0.516712;
+
+% Compare the original A values to the fitted ones
+origSysOH = SpinTrapUtils.DMPO_OH();
+origSysH = SpinTrapUtils.DMPO_H();
+
+fprintf("\n------------------------------------------------------------------\n")
+fprintf(" RESULTS FROM FIT")
+fprintf("\n------------------------------------------------------------------\n")
+
+fprintf('Original DMPO-OH A values [G]: \t[%s]\n', ...
+    num2str(origSysOH.A / SpinTrapUtils.gauss_to_MHz(origSysOH.g)));
+
+fprintf('Fitted DMPO-OH A values [G]: \t[%s]\n', ...
+    num2str(Sys2.A / SpinTrapUtils.gauss_to_MHz(Sys2.g)));
+fprintf("\n------------------------------------------------------------------\n")
+
+fprintf('Original DMPO-H A values [G]: \t[%s]\n', ...
+    num2str(origSysH.A / SpinTrapUtils.gauss_to_MHz(origSysH.g)));
+
+fprintf('Fitted DMPO-H A values [G]: \t[%s]\n', ...
+    num2str(Sys1.A / SpinTrapUtils.gauss_to_MHz(Sys1.g)));
+fprintf("\n------------------------------------------------------------------\n")
+
+% Simulate with garlic
+[~, spc1Fit1] = garlic(Sys1, Exp);
+[~, spc2Fit1] = garlic(Sys2, Exp);
+
+spcTot = spc1Fit1 + spc2Fit1;
+% Plot residuals
+golaySmooth = 51; 
+scaleToUnit = false;
+residuals = SpinTrapUtils.plot_residuals(BExp, spcExp, spcTot, golaySmooth, scaleToUnit);
+
+
+%% Save the original and updated fit
+
+dataFolder = fullfile(pwd, 'Liu_2025');  
+figHandles = findall(0, 'Type', 'figure'); 
+[~, idx] = sort([figHandles.Number]);
+figHandles = figHandles(idx);
+for k = 1:length(figHandles)
+    fig = figHandles(k);
+    filename = fullfile(dataFolder, sprintf('fig%d.png', k));
+    saveas(fig, filename);           
+end
+
+
+fitcsvPath = fullfile(dataFolder, 'fitted_data_Liu_2025.csv');
+SpinTrapUtils.write_spectra(fitcsvPath, BExp,...
+    {spcExp(:), spc1Fit1(:), spc2Fit1(:)}, {"exp", "DMPO_OH", "DMPO-H"})
+
+%%
+
+p = polyfit(BExp, fit1.baseline, 3);
+p
+% 2. Evaluate the fitted polynomial at the BExp x-values
+y_fit = polyval(p, BExp);
+
+figure;
+plot(BExp, y_fit); hold on;
+plot(BExp, fit1.baseline)

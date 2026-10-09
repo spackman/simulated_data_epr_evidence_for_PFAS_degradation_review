@@ -1,0 +1,92 @@
+%% Cao et al. 2024
+% Efficient photocatalytic decomposition of PFOA over BiOI1-x with 
+% low power LED light
+
+clc; clear;
+
+%% Reading in the data
+% Figure 6 c) (light)
+
+csvPath = fullfile(pwd, 'Cao_2024\exp_fig_6c_light_Cao_2024.csv');
+
+% Read the raw data
+[BRaw, spcRaw] = SpinTrapUtils.read_csv(csvPath);
+
+%% Data preparation
+
+% Correct the baseline 
+% (use the average values in these ranges for linear baseline)
+Bvals = [346 349; 352 356];
+
+% Plot the diagnostic plots
+SpinTrapUtils.plot_full_baseline_diagnostics(BRaw, spcRaw, Bvals)
+[spcCorr, baseline] = SpinTrapUtils.baseline_correct(BRaw, spcRaw, Bvals);
+% Scale the baseline corrected spectra to (-1,1)
+spcCorr = spcCorr ./ max(abs(spcCorr));
+
+% Uniformly interpolate the data for fitting
+nPoints = 10e3;
+SpinTrapUtils.plot_uniform(BRaw, spcCorr, nPoints);
+[BExp, spcExp] = SpinTrapUtils.cast_to_uniform(BRaw, spcCorr, nPoints);
+
+%% Plot with original fit
+
+% the MW frequency is not given in the original text
+% an appropriate frequency was guessed to center the spectra
+Exp.mwFreq = 9.841; % GHz
+Exp.Range = [min(BExp(:)) max(BExp(:))]; % mT 
+Exp.nPoints = nPoints;
+
+% the original claim is that the spectra is unusual but characteristic
+% of the DMPO-OH adduct
+Sys1 = SpinTrapUtils.DMPO_OH(); % use the default DMPO data
+
+[~, spc1] = garlic(Sys1, Exp);
+
+golaySmooth = 51; scaleToUnit = true;
+SpinTrapUtils.plot_residuals(BExp, spcExp, spc1, golaySmooth, scaleToUnit)
+
+%% Plot with updated fit
+
+Exp.mwFreq = 9.841; % GHz
+Exp.Range = [min(BExp(:)) max(BExp(:))]; % mT 
+Exp.nPoints = nPoints;
+
+% try to fit with a DMPOX starting point
+Sys2 = SpinTrapUtils.DMPOX(); 
+
+% Parameters to vary
+Sys2Vary.g = 0.01;
+Sys2Vary.A = [2 2] * SpinTrapUtils.gauss_to_MHz(Sys2.g);
+Sys2Vary.lwpp = 0.5;
+
+% Call esfit - fitted system defined below
+%esfit(spcExp, @garlic, {Sys2, Exp}, {Sys2Vary});
+
+% Fitted parameters
+Sys2.g = 2.00505;
+Sys2.A = [20.3747 11.2868]; % MHz
+Sys2.lwpp = 0.09405;
+
+% Compare the original A values to the fitted ones
+origSys = SpinTrapUtils.DMPOX();
+
+fprintf('Original A values [G]: \t[%s]\n', ...
+    num2str(origSys.A / SpinTrapUtils.gauss_to_MHz(origSys.g)));
+
+fprintf('Fitted A values [G]: \t[%s]\n', ...
+    num2str(Sys2.A / SpinTrapUtils.gauss_to_MHz(Sys2.g)));
+
+% Simulate with garlic
+[~, spc2] = garlic(Sys2, Exp);
+
+% Plot residuals
+golaySmooth = 51; 
+scaleToUnit = false;
+SpinTrapUtils.plot_residuals(BExp, spcExp, spc2, golaySmooth, scaleToUnit);
+
+
+
+%% Save the original and updated fit
+
+SpinTrapUtils.wri
